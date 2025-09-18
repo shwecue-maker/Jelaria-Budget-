@@ -1,0 +1,1060 @@
+<script src="script.js"></script>
+<link rel="stylesheet" href="style.css">
+Below is a single-file index.html you can open locally (or upload to GitHub Pages). It implements a feature-rich budget calculator with many of the "maximum features" from the list: incomes & expenses (multiple sources), recurring items, categories & subcategories, goals & savings, debts, investments, dashboard with charts (Chart.js), exports/imports (CSV & JSON), local user profiles, dark/light toggle, simple forecasting, basic data encryption with a passphrase (CryptoJS) stored in localStorage, and simple automated savings allocation. It stores data in the browser (localStorage) so it works offline; bank sync is left as a placeholder.
+
+Save the full file below as index.html and open it in a browser.
+
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>BudgetHQ — Feature-rich Budget Calculator</title>
+
+  <!-- Chart.js -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <!-- FileSaver for downloads -->
+  <script src="https://cdn.jsdelivr.net/npm/file-saver@2.0.5/dist/FileSaver.min.js"></script>
+  <!-- CryptoJS for simple local encryption -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#f6f9fc; --card:#ffffff; --muted:#6b7280; --accent:#2563eb;
+      --danger:#ef4444; --success:#10b981;
+    }
+    [data-theme="dark"]{
+      --bg:#0b1220; --card:#0f1724; --muted:#9ca3af; --accent:#60a5fa;
+      --danger:#f87171; --success:#4ade80;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:Inter,system-ui,Arial,sans-serif;background:var(--bg);color:#0b1220}
+    header{display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:transparent}
+    .container{display:grid;grid-template-columns:260px 1fr;gap:18px;padding:18px}
+    .sidebar{background:var(--card);padding:16px;border-radius:12px;height:calc(100vh - 64px);overflow:auto;box-shadow:0 6px 18px rgba(2,6,23,0.06)}
+    .brand{font-weight:700;font-size:18px;color:var(--accent);display:flex;gap:8px;align-items:center}
+    .btn{background:var(--accent);color:white;padding:8px 12px;border-radius:8px;border:0;cursor:pointer}
+    .muted{color:var(--muted);font-size:13px}
+    .card{background:var(--card);padding:12px;border-radius:12px;box-shadow:0 6px 18px rgba(2,6,23,0.04)}
+    .section{margin-bottom:14px}
+    label{display:block;font-size:13px;margin-bottom:6px;color:var(--muted)}
+    input[type="text"], input[type="number"], select, textarea, input[type="date"]{
+      width:100%;padding:8px;border-radius:8px;border:1px solid #e6eef8;background:transparent
+    }
+    .row{display:flex;gap:8px}
+    .row .col{flex:1}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:8px;border-bottom:1px solid rgba(0,0,0,0.05);font-size:13px}
+    th{font-weight:600;text-align:left}
+    .small{font-size:12px}
+    .top-stats{display:flex;gap:12px}
+    .stat{flex:1;padding:12px;border-radius:10px;background:linear-gradient(180deg,rgba(255,255,255,0.6),transparent)}
+    .danger{color:var(--danger)}
+    .success{color:var(--success)}
+    footer{padding:14px;text-align:center;color:var(--muted);font-size:13px}
+    .controls{display:flex;gap:8px;flex-wrap:wrap}
+    .chip{padding:6px 10px;border-radius:999px;border:1px dashed #e6eef8;font-size:13px}
+    .flex{display:flex;align-items:center;gap:8px}
+    .hidden{display:none}
+    .profile-list{display:flex;flex-direction:column;gap:8px}
+    .profile{padding:10px;border-radius:8px;background:linear-gradient(180deg,#fff,#f8fbff);cursor:pointer}
+    .danger-btn{background:transparent;border:1px solid rgba(239,68,68,0.15);color:var(--danger);padding:8px;border-radius:8px}
+    .small-link{font-size:13px;color:var(--accent);cursor:pointer}
+    .topbar-actions{display:flex;gap:8px;align-items:center}
+    @media(max-width:900px){
+      .container{grid-template-columns:1fr; padding:12px}
+      .sidebar{height:auto}
+    }
+  </style>
+</head>
+<body data-theme="light">
+  <header>
+    <div class="brand">
+      <img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='28' viewBox='0 0 24 24'%3E%3Cpath fill='%232563eb' d='M5 3h14v14H5z'/%3E%3Cpath fill='%23fff' d='M7 7h10v10H7z'/%3E%3C/svg%3E" alt="logo">
+      BudgetHQ
+    </div>
+    <div class="topbar-actions">
+      <div class="muted small" id="currentUserLabel">No Profile</div>
+      <button class="btn" id="newProfileBtn">New Profile</button>
+      <button class="btn" id="exportJsonBtn">Export JSON</button>
+      <button class="btn" id="exportCsvBtn">Export CSV</button>
+      <button class="btn" id="importBtn">Import</button>
+      <button class="btn" id="toggleThemeBtn">Dark</button>
+    </div>
+  </header>
+
+  <div class="container">
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <div class="section card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <div class="muted">Profiles</div>
+            <div class="small muted">Switch between family members or accounts</div>
+          </div>
+        </div>
+        <div style="height:12px"></div>
+        <div id="profiles" class="profile-list"></div>
+        <div style="height:12px"></div>
+        <div class="muted small">Encryption</div>
+        <div class="row" style="margin-top:8px">
+          <input id="passphrase" type="text" placeholder="passphrase (optional)">
+          <button class="btn" id="applyPassBtn">Apply</button>
+        </div>
+        <div class="muted small" style="margin-top:8px">Use a passphrase to encrypt your data locally. Not transmitted anywhere.</div>
+      </div>
+
+      <div class="section card">
+        <div class="muted">Quick Add</div>
+        <div style="height:8px"></div>
+        <div class="row">
+          <div class="col">
+            <label>Type</label>
+            <select id="quickType">
+              <option value="expense">Expense</option>
+              <option value="income">Income</option>
+            </select>
+          </div>
+          <div class="col">
+            <label>Category</label>
+            <input id="quickCategory" type="text" placeholder="e.g., Food">
+          </div>
+        </div>
+        <div style="height:8px"></div>
+        <div class="row">
+          <div class="col">
+            <label>Amount</label>
+            <input id="quickAmount" type="number" placeholder="0.00">
+          </div>
+          <div class="col">
+            <label>Date</label>
+            <input id="quickDate" type="date">
+          </div>
+        </div>
+        <div style="height:8px"></div>
+        <button class="btn" id="quickAddBtn">Add</button>
+      </div>
+
+      <div class="section card">
+        <div class="muted">Shortcuts</div>
+        <div style="height:8px"></div>
+        <div class="controls">
+          <div class="chip" id="goToDashboardBtn">Dashboard</div>
+          <div class="chip" id="goToTransactionsBtn">Transactions</div>
+          <div class="chip" id="goToGoalsBtn">Goals</div>
+          <div class="chip" id="goToDebtsBtn">Debts</div>
+        </div>
+      </div>
+
+      <div class="section card">
+        <div class="muted">Settings</div>
+        <div style="height:8px"></div>
+        <label>Currency</label>
+        <select id="currencySelect">
+          <option value="$">USD ($)</option>
+          <option value="€">EUR (€)</option>
+          <option value="£">GBP (£)</option>
+          <option value="Ks">MMK (Ks)</option>
+        </select>
+        <div style="height:8px"></div>
+        <label>Auto-save allocation (%)</label>
+        <input id="autoSavePercent" type="number" min="0" max="100" value="20">
+      </div>
+
+      <div style="height:8px"></div>
+      <div class="muted small">Version 1.0 — Local only</div>
+    </aside>
+
+    <!-- MAIN -->
+    <main>
+      <!-- Dashboard -->
+      <section id="dashboard" class="section card">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h2 style="margin:0">Dashboard</h2>
+            <div class="muted small">Overview of your finances</div>
+          </div>
+          <div>
+            <div class="muted small">Selected month: <span id="selectedMonthLabel"></span></div>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+        <div class="top-stats">
+          <div class="stat card">
+            <div class="muted small">Net Income</div>
+            <div style="font-size:20px;font-weight:700" id="netIncome">$0</div>
+            <div class="muted small">Income - Expenses</div>
+          </div>
+          <div class="stat card">
+            <div class="muted small">Total Expenses</div>
+            <div style="font-size:20px;font-weight:700;color:var(--danger)" id="totalExpenses">$0</div>
+            <div class="muted small">This month</div>
+          </div>
+          <div class="stat card">
+            <div class="muted small">Savings Goal Progress</div>
+            <div style="font-size:20px;font-weight:700;color:var(--success)" id="savingsProgress">0%</div>
+            <div class="muted small">Across active goals</div>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div style="display:grid;grid-template-columns:1fr 360px;gap:12px">
+          <div class="card">
+            <canvas id="expensePie" height="220"></canvas>
+            <div style="height:12px"></div>
+            <canvas id="trendLine" height="180"></canvas>
+          </div>
+
+          <div class="card">
+            <div class="muted small">Recent Transactions</div>
+            <div style="height:8px"></div>
+            <div id="recentList"></div>
+            <div style="height:8px"></div>
+            <div class="muted small">Forecast (next month)</div>
+            <div id="forecastBox" class="small muted">No data</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Transactions -->
+      <section id="transactions" class="section card hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h3 style="margin:0">Transactions</h3>
+            <div class="muted small">Add incomes, expenses, recurring and import bank CSV</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="addTxnBtn">Add Transaction</button>
+            <button class="btn" id="importCsvBtn">Import CSV</button>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <!-- Add Form -->
+        <div id="txnForm" class="card hidden">
+          <div style="display:flex;justify-content:space-between">
+            <div style="font-weight:600">Add transaction</div>
+            <div class="small muted">Recurring items will be created automatically on schedule.</div>
+          </div>
+          <div style="height:8px"></div>
+          <div class="row">
+            <div class="col">
+              <label>Type</label>
+              <select id="txnType">
+                <option value="expense">Expense</option>
+                <option value="income">Income</option>
+              </select>
+            </div>
+            <div class="col">
+              <label>Category</label>
+              <input id="txnCategory" type="text" placeholder="e.g., Rent">
+            </div>
+          </div>
+
+          <div style="height:8px"></div>
+
+          <div class="row">
+            <div class="col">
+              <label>Amount</label>
+              <input id="txnAmount" type="number" placeholder="0.00">
+            </div>
+            <div class="col">
+              <label>Date</label>
+              <input id="txnDate" type="date">
+            </div>
+          </div>
+
+          <div style="height:8px"></div>
+
+          <div class="row">
+            <div class="col">
+              <label>Notes</label>
+              <input id="txnNotes" type="text" placeholder="e.g., grocery at store X">
+            </div>
+            <div style="width:180px">
+              <label>Recurring</label>
+              <select id="txnRecurring">
+                <option value="none">None</option>
+                <option value="monthly">Monthly</option>
+                <option value="weekly">Weekly</option>
+                <option value="yearly">Yearly</option>
+              </select>
+            </div>
+          </div>
+          <div style="height:8px"></div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="saveTxnBtn">Save</button>
+            <button class="danger-btn" id="cancelTxnBtn">Cancel</button>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div class="card">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <label>Filter</label>
+              <div style="display:flex;gap:8px">
+                <select id="filterType">
+                  <option value="all">All</option>
+                  <option value="income">Income</option>
+                  <option value="expense">Expense</option>
+                </select>
+                <input id="filterCategory" type="text" placeholder="Category">
+                <input id="filterFrom" type="date">
+                <input id="filterTo" type="date">
+                <button class="btn" id="applyFilterBtn">Apply</button>
+              </div>
+            </div>
+            <div>
+              <div class="small muted">Total: <span id="filterTotal">$0</span></div>
+            </div>
+          </div>
+
+          <div style="height:8px"></div>
+          <div style="max-height:320px;overflow:auto">
+            <table id="txnTable">
+              <thead>
+                <tr><th>Date</th><th>Type</th><th>Category</th><th>Amount</th><th>Notes</th><th>Actions</th></tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Goals -->
+      <section id="goals" class="section card hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h3 style="margin:0">Savings Goals</h3>
+            <div class="muted small">Create goals and track progress</div>
+          </div>
+          <div>
+            <button class="btn" id="addGoalBtn">New Goal</button>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div id="goalsList" class="card"></div>
+      </section>
+
+      <!-- Debts & Investments -->
+      <section id="debts" class="section card hidden">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div>
+            <h3 style="margin:0">Debts & Investments</h3>
+            <div class="muted small">Track loans and investment holdings</div>
+          </div>
+          <div style="display:flex;gap:8px">
+            <button class="btn" id="addDebtBtn">Add Loan</button>
+            <button class="btn" id="addInvBtn">Add Investment</button>
+          </div>
+        </div>
+
+        <div style="height:12px"></div>
+
+        <div id="debtsList" class="card"></div>
+        <div style="height:12px"></div>
+        <div id="invList" class="card"></div>
+      </section>
+
+      <footer class="muted small">Local app. Your data stays in your browser. Use passphrase to add local encryption.</footer>
+    </main>
+  </div>
+
+  <!-- Hidden file input for imports -->
+  <input id="fileInput" type="file" class="hidden" accept=".json,.csv">
+
+<script>
+/******************************************************************************
+ * BudgetHQ — Single-file app
+ * Features implemented:
+ * - Profiles (multi-user) stored in localStorage
+ * - Transactions: income/expense, categories, notes, recurring
+ * - Recent list, charts (pie + trend), forecast (simple)
+ * - Goals (savings), Debts, Investments
+ * - Export JSON, Export CSV, Import
+ * - Local "encryption" using CryptoJS AES with a passphrase
+ * - Auto-allocation to savings percentage
+ * - Simple CSV import (basic)
+ *
+ * Notes:
+ * - This stores everything under localStorage key: "BudgetHQ_data_v1"
+ * - Encryption is optional (passphrase). Use strong passphrase if used.
+ ******************************************************************************/
+
+// ---------- Utilities ----------
+const STORAGE_KEY = 'BudgetHQ_data_v1';
+const DEFAULT_CURRENCY = '$';
+let state = { profiles: [], activeProfileId: null, settings: { currency: DEFAULT_CURRENCY, autoSavePercent: 20 }, passphrase: '' };
+
+function uid(prefix='id'){return prefix + '_' + Math.random().toString(36).slice(2,10)}
+function nowISO(date=new Date()){ return date.toISOString().slice(0,10) }
+function loadState(){
+  try {
+    let raw = localStorage.getItem(STORAGE_KEY);
+    if(!raw) { saveState(); return; }
+    if(state.passphrase){
+      try{
+        const bytes = CryptoJS.AES.decrypt(raw, state.passphrase);
+        const decrypted = bytes.toString(CryptoJS.enc.Utf8);
+        raw = decrypted || raw;
+      } catch(e){ console.warn('decryption failed', e) }
+    }
+    state = JSON.parse(raw);
+  } catch(e){
+    console.error('loadState error', e)
+  }
+}
+function saveState(){
+  try {
+    let raw = JSON.stringify(state);
+    if(state.passphrase){
+      raw = CryptoJS.AES.encrypt(raw, state.passphrase).toString();
+    }
+    localStorage.setItem(STORAGE_KEY, raw);
+  } catch(e){ console.error('saveState error', e) }
+}
+
+function formatMoney(v){
+  const curr = state.settings?.currency || DEFAULT_CURRENCY;
+  const abs = Math.abs(Number(v || 0)).toFixed(2);
+  return (v < 0 ? '-' : '') + curr + Number(abs).toLocaleString();
+}
+
+// ---------- Initialization ----------
+document.addEventListener('DOMContentLoaded', ()=> {
+  initUI();
+  loadState();
+  if(!state.profiles.length) {
+    // create a sample profile
+    const p = createProfile('You');
+    state.activeProfileId = p.id;
+    saveState();
+  }
+  renderAll();
+});
+
+// ---------- Profile management ----------
+function createProfile(name){
+  const p = {
+    id: uid('profile'),
+    name: name || 'Profile',
+    transactions: [], // { id, type, amount, date, category, notes, recurring }
+    goals: [], // {id,name,target, saved}
+    debts: [], // {id,name,principal,rate,monthlyPayment}
+    investments: [], // {id,name, quantity, unitPrice}
+    createdAt: new Date().toISOString()
+  };
+  state.profiles.push(p);
+  saveState();
+  renderProfiles();
+  return p;
+}
+function updateProfileName(id, name){
+  const p = state.profiles.find(x=>x.id===id);
+  if(p) p.name = name;
+  saveState(); renderProfiles();
+}
+function deleteProfile(id){
+  state.profiles = state.profiles.filter(p=>p.id!==id);
+  if(state.activeProfileId===id) state.activeProfileId = state.profiles[0]?.id || null;
+  saveState(); renderAll();
+}
+function setActiveProfile(id){
+  state.activeProfileId = id;
+  saveState(); renderAll();
+}
+function getActiveProfile(){ return state.profiles.find(p=>p.id===state.activeProfileId) }
+
+// ---------- UI & Rendering ----------
+function initUI(){
+  // Buttons
+  document.getElementById('newProfileBtn').addEventListener('click', ()=> {
+    const name = prompt('New profile name:','New user');
+    if(name) { const p=createProfile(name); setActiveProfile(p.id); }
+  });
+  document.getElementById('applyPassBtn').addEventListener('click', ()=> {
+    const pass = document.getElementById('passphrase').value.trim();
+    state.passphrase = pass || '';
+    // try to reload state (decrypt) if pass provided
+    loadState(); saveState();
+    renderAll();
+    alert('Passphrase applied locally. If you used a passphrase to encrypt earlier, you'll need the same one to view data.');
+  });
+  document.getElementById('exportJsonBtn').addEventListener('click', exportJson);
+  document.getElementById('exportCsvBtn').addEventListener('click', exportCsv);
+  document.getElementById('importBtn').addEventListener('click', ()=> document.getElementById('fileInput').click());
+  document.getElementById('fileInput').addEventListener('change', handleFileImport);
+  document.getElementById('toggleThemeBtn').addEventListener('click', toggleTheme);
+
+  // Quick add
+  document.getElementById('quickAddBtn').addEventListener('click', quickAdd);
+
+  // Nav shortcuts
+  document.getElementById('goToDashboardBtn').addEventListener('click', ()=>showSection('dashboard'));
+  document.getElementById('goToTransactionsBtn').addEventListener('click', ()=>showSection('transactions'));
+  document.getElementById('goToGoalsBtn').addEventListener('click', ()=>showSection('goals'));
+  document.getElementById('goToDebtsBtn').addEventListener('click', ()=>showSection('debts'));
+
+  // Transactions page controls
+  document.getElementById('addTxnBtn').addEventListener('click', ()=>toggleTxnForm(true));
+  document.getElementById('importCsvBtn').addEventListener('click', ()=>document.getElementById('fileInput').click());
+  document.getElementById('cancelTxnBtn').addEventListener('click', ()=>toggleTxnForm(false));
+  document.getElementById('saveTxnBtn').addEventListener('click', saveTxn);
+  document.getElementById('applyFilterBtn').addEventListener('click', applyFilter);
+
+  // Goals
+  document.getElementById('addGoalBtn').addEventListener('click', ()=> {
+    const name = prompt('Goal name (e.g., Vacation):');
+    if(!name) return;
+    const target = parseFloat(prompt('Target amount:','500'));
+    if(isNaN(target)) return alert('Invalid amount');
+    const p = getActiveProfile();
+    p.goals.push({ id: uid('goal'), name, target: Number(target), saved: 0 });
+    saveState(); renderAll();
+  });
+
+  // Debts & investments
+  document.getElementById('addDebtBtn').addEventListener('click', ()=> {
+    const name = prompt('Loan name (e.g., Student Loan):'); if(!name) return;
+    const principal = parseFloat(prompt('Principal amount:', '1000')); if(isNaN(principal)) return;
+    const rate = parseFloat(prompt('Annual interest rate (%)', '5')); if(isNaN(rate)) return;
+    const monthlyPayment = parseFloat(prompt('Monthly payment', (principal/24).toFixed(2))); if(isNaN(monthlyPayment)) return;
+    const p = getActiveProfile();
+    p.debts.push({ id: uid('debt'), name, principal:Number(principal), rate:Number(rate), monthlyPayment:Number(monthlyPayment) });
+    saveState(); renderAll();
+  });
+  document.getElementById('addInvBtn').addEventListener('click', ()=> {
+    const name = prompt('Investment name (e.g., AAPL):'); if(!name) return;
+    const quantity = parseFloat(prompt('Quantity', '1')); if(isNaN(quantity)) return;
+    const unitPrice = parseFloat(prompt('Unit price', '100')); if(isNaN(unitPrice)) return;
+    const p = getActiveProfile();
+    p.investments.push({ id: uid('inv'), name, quantity:Number(quantity), unitPrice:Number(unitPrice) });
+    saveState(); renderAll();
+  });
+
+  // Settings
+  document.getElementById('currencySelect').addEventListener('change', (e)=> {
+    state.settings.currency = e.target.value; saveState(); renderAll();
+  });
+  document.getElementById('autoSavePercent').addEventListener('change', (e)=> {
+    state.settings.autoSavePercent = Number(e.target.value || 0); saveState();
+  });
+
+  // Filters and quick UI
+  document.getElementById('filterType').value = 'all';
+  document.getElementById('selectedMonthLabel').textContent = new Date().toLocaleString('default',{month:'long',year:'numeric'});
+  document.getElementById('toggleThemeBtn').addEventListener('click', toggleTheme);
+}
+
+function renderProfiles(){
+  const container = document.getElementById('profiles');
+  container.innerHTML = '';
+  state.profiles.forEach(p=>{
+    const el = document.createElement('div');
+    el.className = 'profile';
+    el.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center">
+      <div style="font-weight:600">${p.name}</div>
+      <div style="display:flex;gap:6px">
+        <button class="small-link" data-id="${p.id}" data-rename>Rename</button>
+        <button class="small-link" data-id="${p.id}" data-delete>Del</button>
+      </div>
+    </div>
+    <div class="muted small">Transactions: ${p.transactions.length} | Goals: ${p.goals.length}</div>`;
+    el.addEventListener('click', (ev)=>{
+      // clicking profile selects it
+      if(ev.target.dataset.rename) {
+        const newName = prompt('Rename profile', p.name); if(newName) { updateProfileName(p.id, newName); }
+        ev.stopPropagation(); return;
+      }
+      if(ev.target.dataset.delete) {
+        if(!confirm('Delete profile and all data?')) { ev.stopPropagation(); return; }
+        deleteProfile(p.id); ev.stopPropagation(); return;
+      }
+      setActiveProfile(p.id);
+    });
+    if(state.activeProfileId===p.id) el.style.outline='2px solid var(--accent)';
+    container.appendChild(el);
+  });
+  // small add profile area
+  const addEl = document.createElement('div');
+  addEl.style.marginTop='8px';
+  addEl.innerHTML = `<input id="newProfileName" placeholder="Profile name" style="width:calc(100% - 90px);padding:6px;border-radius:8px;border:1px solid #eaeaea">
+    <button class="btn" id="createProfileQuick">Create</button>`;
+  container.appendChild(addEl);
+  document.getElementById('createProfileQuick').addEventListener('click', ()=>{
+    const name = document.getElementById('newProfileName').value.trim(); if(!name) return alert('Enter name');
+    const p = createProfile(name); setActiveProfile(p.id);
+  });
+}
+
+function renderAll(){
+  loadState(); renderProfiles();
+  const p = getActiveProfile();
+  document.getElementById('currentUserLabel').textContent = p ? p.name : 'No Profile';
+  document.getElementById('currencySelect').value = state.settings.currency || DEFAULT_CURRENCY;
+  document.getElementById('autoSavePercent').value = state.settings.autoSavePercent || 0;
+  renderDashboard();
+  renderTransactions();
+  renderGoals();
+  renderDebts();
+}
+
+function showSection(id){
+  const sections = ['dashboard','transactions','goals','debts'];
+  sections.forEach(s=> document.getElementById(s).classList.toggle('hidden', s!==id));
+  if(id==='transactions') document.getElementById('txnForm').classList.add('hidden');
+}
+
+function toggleTxnForm(show=true){
+  document.getElementById('txnForm').classList.toggle('hidden', !show);
+  if(show){
+    document.getElementById('txnDate').value = nowISO();
+    document.getElementById('txnAmount').value = '';
+    document.getElementById('txnCategory').value = '';
+    document.getElementById('txnNotes').value = '';
+    document.getElementById('txnRecurring').value = 'none';
+  }
+}
+
+// ---------- Transactions ----------
+function quickAdd(){
+  const type = document.getElementById('quickType').value;
+  const amount = parseFloat(document.getElementById('quickAmount').value || 0);
+  const category = document.getElementById('quickCategory').value || 'Misc';
+  const date = document.getElementById('quickDate').value || nowISO();
+  if(isNaN(amount) || amount===0) return alert('Enter amount');
+  const p = getActiveProfile();
+  p.transactions.push({ id: uid('txn'), type, amount: Number(amount), date, category, notes:'quick', recurring:'none', createdAt: new Date().toISOString() });
+  // auto allocation to savings
+  autoAllocateToSavings(Number(amount), type);
+  saveState();
+  renderAll();
+}
+
+function saveTxn(){
+  const type = document.getElementById('txnType').value;
+  const amount = parseFloat(document.getElementById('txnAmount').value || 0);
+  const category = document.getElementById('txnCategory').value || 'Misc';
+  const date = document.getElementById('txnDate').value || nowISO();
+  const notes = document.getElementById('txnNotes').value || '';
+  const recurring = document.getElementById('txnRecurring').value;
+  if(isNaN(amount) || amount===0) return alert('Enter amount');
+  const p = getActiveProfile();
+  p.transactions.push({ id: uid('txn'), type, amount: Number(amount), date, category, notes, recurring, createdAt: new Date().toISOString() });
+  autoAllocateToSavings(Number(amount), type);
+  saveState(); renderAll(); toggleTxnForm(false);
+}
+
+function autoAllocateToSavings(amount, type){
+  // If income, allocate auto-save percent into a "savings" special goal (create if not exist)
+  if(type !== 'income') return;
+  const pct = Number(state.settings.autoSavePercent || 0);
+  if(pct <= 0) return;
+  const p = getActiveProfile();
+  let savings = p.goals.find(g => g.name === '__AUTOSAVE__');
+  if(!savings){
+    savings = { id: uid('goal'), name:'__AUTOSAVE__', target:0, saved:0 };
+    p.goals.push(savings);
+  }
+  const add = amount * (pct/100);
+  savings.saved += add;
+  // Save but don't change target
+}
+
+// ---------- Rendering dashboard charts ----------
+let pieChart=null, trendChart=null;
+function renderDashboard(){
+  const p = getActiveProfile(); if(!p) return;
+  // compute totals this month
+  const today = new Date();
+  const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+  const txns = p.transactions || [];
+  let totalIncome = 0, totalExpenses = 0;
+  const byCat = {};
+  txns.forEach(t=>{
+    const tDate = new Date(t.date);
+    if(tDate >= monthStart && tDate.getMonth()===monthStart.getMonth() && tDate.getFullYear()===monthStart.getFullYear()){
+      if(t.type==='income') totalIncome += Number(t.amount);
+      else totalExpenses += Number(t.amount);
+      byCat[t.category] = (byCat[t.category] || 0) + Number(t.amount || 0);
+    }
+  });
+  document.getElementById('netIncome').textContent = formatMoney(totalIncome - totalExpenses);
+  document.getElementById('totalExpenses').textContent = formatMoney(totalExpenses);
+  // savings progress
+  const goals = p.goals || [];
+  const activeGoals = goals.filter(g=>g.target && g.target>0);
+  const totalProgress = activeGoals.length ? Math.round((activeGoals.reduce((s,g)=>s+g.saved,0)/activeGoals.reduce((s,g)=>s+g.target,0))*100) : 0;
+  document.getElementById('savingsProgress').textContent = totalProgress + '%';
+
+  // pie chart
+  const pieCtx = document.getElementById('expensePie').getContext('2d');
+  const labels = Object.keys(byCat).slice(0,8);
+  const data = labels.map(k=>byCat[k]);
+  if(pieChart) pieChart.destroy();
+  pieChart = new Chart(pieCtx, {
+    type:'pie',
+    data:{ labels, datasets:[{ data, backgroundColor: labels.map(()=>undefined) }]},
+    options:{ plugins:{legend:{position:'bottom'}}}
+  });
+
+  // trend: last 6 months income/expense
+  const months = [];
+  const incData = [], expData = [];
+  for(let i=5;i>=0;i--){
+    const d = new Date(today.getFullYear(), today.getMonth()-i, 1);
+    const key = d.toLocaleString('default',{month:'short',year:'numeric'});
+    months.push(key);
+    const inc = p.transactions.filter(t=>{
+      const dt = new Date(t.date);
+      return dt.getMonth()===d.getMonth() && dt.getFullYear()===d.getFullYear() && t.type==='income';
+    }).reduce((s,t)=>s+Number(t.amount),0);
+    const exp = p.transactions.filter(t=>{
+      const dt = new Date(t.date);
+      return dt.getMonth()===d.getMonth() && dt.getFullYear()===d.getFullYear() && t.type==='expense';
+    }).reduce((s,t)=>s+Number(t.amount),0);
+    incData.push(inc); expData.push(exp);
+  }
+  const trendCtx = document.getElementById('trendLine').getContext('2d');
+  if(trendChart) trendChart.destroy();
+  trendChart = new Chart(trendCtx, {
+    type:'line',
+    data:{ labels: months, datasets:[
+      { label:'Income', data: incData, tension:0.3, fill:false },
+      { label:'Expense', data: expData, tension:0.3, fill:false }
+    ]},
+    options:{ plugins:{legend:{position:'bottom'}}}
+  });
+
+  // recent transactions
+  const recent = txns.slice().sort((a,b)=> new Date(b.date) - new Date(a.date)).slice(0,8);
+  const recentBox = document.getElementById('recentList'); recentBox.innerHTML = '';
+  recent.forEach(r=>{
+    const div = document.createElement('div'); div.className='row';
+    div.innerHTML = `<div style="flex:1"><b>${r.category}</b><div class="muted small">${r.notes || ''}</div></div>
+      <div style="min-width:120px;text-align:right">${formatMoney(r.amount)}</div>
+      <div style="min-width:90px;text-align:right" class="muted small">${r.date}</div>`;
+    recentBox.appendChild(div);
+  });
+
+  // forecast: simple linear: next month = last month income - avg expenses growth
+  const lastMonthIndex = months.length - 1;
+  const forecastVal = incData[lastMonthIndex] - expData[lastMonthIndex];
+  const forecastBox = document.getElementById('forecastBox');
+  forecastBox.textContent = forecastVal ? `${formatMoney(forecastVal)} (simple last-month diff)` : 'Not enough data';
+
+  // selectedMonthLabel
+  document.getElementById('selectedMonthLabel').textContent = new Date().toLocaleString('default',{month:'long',year:'numeric'});
+}
+
+// ---------- Transactions Table & filters ----------
+function renderTransactions(){
+  const p = getActiveProfile(); if(!p) return;
+  const tbody = document.querySelector('#txnTable tbody');
+  tbody.innerHTML = '';
+  const txns = p.transactions ? p.transactions.slice().sort((a,b)=>new Date(b.date)-new Date(a.date)) : [];
+  txns.forEach(t=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${t.date}</td>
+      <td>${t.type}</td>
+      <td>${t.category}</td>
+      <td>${formatMoney(t.amount)}</td>
+      <td>${(t.notes||'')}</td>
+      <td>
+        <button class="small-link" data-id="${t.id}" data-edit>Edit</button>
+        <button class="small-link" data-id="${t.id}" data-del>Delete</button>
+      </td>`;
+    tbody.appendChild(tr);
+    tr.querySelector('[data-edit]')?.addEventListener('click', ()=> editTxn(t.id));
+    tr.querySelector('[data-del]')?.addEventListener('click', ()=> {
+      if(confirm('Delete transaction?')) { p.transactions = p.transactions.filter(x=>x.id!==t.id); saveState(); renderAll(); }
+    });
+  });
+  // update filter total
+  document.getElementById('filterTotal').textContent = formatMoney(txns.reduce((s,t)=> s + (t.type==='expense' ? Number(t.amount) : 0), 0));
+}
+
+function editTxn(id){
+  const p = getActiveProfile(); const t = p.transactions.find(x=>x.id===id); if(!t) return;
+  toggleTxnForm(true);
+  document.getElementById('txnType').value = t.type;
+  document.getElementById('txnCategory').value = t.category;
+  document.getElementById('txnAmount').value = t.amount;
+  document.getElementById('txnDate').value = t.date;
+  document.getElementById('txnNotes').value = t.notes;
+  document.getElementById('txnRecurring').value = t.recurring || 'none';
+  // Replace save handler to update existing (simple approach)
+  const saveBtn = document.getElementById('saveTxnBtn');
+  const originalHandler = saveBtn.onclick;
+  saveBtn.onclick = ()=>{
+    t.type = document.getElementById('txnType').value;
+    t.category = document.getElementById('txnCategory').value;
+    t.amount = Number(document.getElementById('txnAmount').value);
+    t.date = document.getElementById('txnDate').value;
+    t.notes = document.getElementById('txnNotes').value;
+    t.recurring = document.getElementById('txnRecurring').value;
+    saveState(); renderAll(); toggleTxnForm(false);
+    // restore handler
+    saveBtn.onclick = originalHandler;
+  };
+}
+
+// ---------- Filters ----------
+function applyFilter(){
+  const p = getActiveProfile();
+  if(!p) return;
+  const type = document.getElementById('filterType').value;
+  const category = document.getElementById('filterCategory').value.trim().toLowerCase();
+  const from = document.getElementById('filterFrom').value;
+  const to = document.getElementById('filterTo').value;
+  let list = p.transactions.slice();
+  if(type!=='all') list = list.filter(t=>t.type===type);
+  if(category) list = list.filter(t=>t.category && t.category.toLowerCase().includes(category));
+  if(from) list = list.filter(t=> new Date(t.date) >= new Date(from));
+  if(to) list = list.filter(t=> new Date(t.date) <= new Date(to));
+  const tbody = document.querySelector('#txnTable tbody'); tbody.innerHTML='';
+  list.forEach(t=>{
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${t.date}</td><td>${t.type}</td><td>${t.category}</td><td>${formatMoney(t.amount)}</td><td>${t.notes||''}</td><td><button class="small-link" data-id="${t.id}" data-del>Delete</button></td>`;
+    tbody.appendChild(tr);
+    tr.querySelector('[data-del]')?.addEventListener('click', ()=> {
+      if(confirm('Delete transaction?')) { p.transactions = p.transactions.filter(x=>x.id!==t.id); saveState(); renderAll(); }
+    });
+  });
+  const total = list.reduce((s,t)=> s + (t.type==='expense' ? Number(t.amount) : 0), 0);
+  document.getElementById('filterTotal').textContent = formatMoney(total);
+}
+
+// ---------- Goals rendering ----------
+function renderGoals(){
+  const p = getActiveProfile(); if(!p) return;
+  const box = document.getElementById('goalsList'); box.innerHTML = '';
+  if(!p.goals.length) { box.innerHTML = '<div class="muted small">No goals yet</div>'; return; }
+  p.goals.forEach(g=>{
+    const div = document.createElement('div'); div.style.padding='8px'; div.style.borderBottom='1px solid rgba(0,0,0,0.04)';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between"><div><b>${g.name}</b><div class="muted small">Target: ${g.target ? formatMoney(g.target) : '—'}</div></div>
+      <div style="text-align:right"><div style="font-weight:700">${formatMoney(g.saved)}</div><div class="muted small">${g.target ? Math.round((g.saved/g.target)*100) + '%' : ''}</div></div></div>
+      <div style="margin-top:6px;display:flex;gap:8px"><button class="btn" data-id="${g.id}" data-addfund>Add</button><button class="danger-btn" data-id="${g.id}" data-del>Delete</button></div>`;
+    box.appendChild(div);
+    div.querySelector('[data-addfund]').addEventListener('click', ()=> {
+      const amt = parseFloat(prompt('Add amount to this goal:', '0')); if(isNaN(amt) || amt<=0) return;
+      g.saved += Number(amt); saveState(); renderAll();
+    });
+    div.querySelector('[data-del]').addEventListener('click', ()=> {
+      if(!confirm('Delete goal?')) return;
+      p.goals = p.goals.filter(x=>x.id!==g.id); saveState(); renderAll();
+    });
+  });
+}
+
+// ---------- Debts & investments rendering ----------
+function renderDebts(){
+  const p = getActiveProfile(); if(!p) return;
+  const dbox = document.getElementById('debtsList'); dbox.innerHTML = '';
+  if(!p.debts.length) dbox.innerHTML = '<div class="muted small">No debts recorded</div>';
+  p.debts.forEach(d=>{
+    const monthlyInterest = (d.principal * (d.rate/100))/12;
+    const div = document.createElement('div'); div.style.padding='8px'; div.style.borderBottom='1px solid rgba(0,0,0,0.04)';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between"><div><b>${d.name}</b><div class="muted small">Principal: ${formatMoney(d.principal)} • Rate: ${d.rate}%</div></div>
+      <div style="text-align:right"><div class="muted small">Monthly Pay</div><div style="font-weight:700">${formatMoney(d.monthlyPayment)}</div></div></div>
+      <div style="margin-top:6px;display:flex;gap:8px"><button class="btn" data-id="${d.id}" data-pay>Make Payment</button><button class="danger-btn" data-id="${d.id}" data-del>Delete</button></div>`;
+    dbox.appendChild(div);
+    div.querySelector('[data-pay]').addEventListener('click', ()=> {
+      const amt = parseFloat(prompt('Payment amount:', String(d.monthlyPayment))); if(isNaN(amt) || amt<=0) return;
+      d.principal -= amt;
+      if(d.principal <= 0) { if(confirm('Debt cleared. Remove it?')) p.debts = p.debts.filter(x=>x.id!==d.id); }
+      saveState(); renderAll();
+    });
+    div.querySelector('[data-del]').addEventListener('click', ()=> { if(confirm('Delete?')) { p.debts = p.debts.filter(x=>x.id!==d.id); saveState(); renderAll(); }});
+  });
+
+  const ibox = document.getElementById('invList'); ibox.innerHTML = '';
+  if(!p.investments.length) ibox.innerHTML = '<div class="muted small">No investments recorded</div>';
+  p.investments.forEach(inv=>{
+    const value = inv.quantity * inv.unitPrice;
+    const div = document.createElement('div'); div.style.padding='8px'; div.style.borderBottom='1px solid rgba(0,0,0,0.04)';
+    div.innerHTML = `<div style="display:flex;justify-content:space-between"><div><b>${inv.name}</b><div class="muted small">Qty: ${inv.quantity} @ ${formatMoney(inv.unitPrice)}</div></div>
+      <div style="text-align:right"><div class="muted small">Value</div><div style="font-weight:700">${formatMoney(value)}</div></div></div>
+      <div style="margin-top:6px;display:flex;gap:8px"><button class="btn" data-id="${inv.id}" data-edit>Edit</button><button class="danger-btn" data-id="${inv.id}" data-del>Delete</button></div>`;
+    ibox.appendChild(div);
+    div.querySelector('[data-edit]').addEventListener('click', ()=> {
+      const q = parseFloat(prompt('Quantity:', String(inv.quantity))); if(isNaN(q)) return;
+      const pPrice = parseFloat(prompt('Unit price:', String(inv.unitPrice))); if(isNaN(pPrice)) return;
+      inv.quantity = q; inv.unitPrice = pPrice; saveState(); renderAll();
+    });
+    div.querySelector('[data-del]').addEventListener('click', ()=> { if(confirm('Delete?')) { p.investments = p.investments.filter(x=>x.id!==inv.id); saveState(); renderAll(); }});
+  });
+}
+
+// ---------- Export / Import ----------
+function exportJson(){
+  const dataRaw = JSON.stringify(state, null, 2);
+  const blob = new Blob([dataRaw], {type: 'application/json;charset=utf-8'});
+  saveAs(blob, 'budgethq_export.json');
+}
+
+function exportCsv(){
+  const p = getActiveProfile();
+  if(!p) return alert('Select a profile first');
+  const rows = [['id','date','type','category','amount','notes','recurring']];
+  p.transactions.forEach(t=>{
+    rows.push([t.id, t.date, t.type, t.category, t.amount, (t.notes||''), (t.recurring||'')]);
+  });
+  const csv = rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+  const blob = new Blob([csv], {type:'text/csv;charset=utf-8'});
+  saveAs(blob, 'transactions.csv');
+}
+
+function handleFileImport(e){
+  const f = e.target.files[0]; if(!f) return;
+  const reader = new FileReader();
+  reader.onload = function(ev){
+    const text = ev.target.result;
+    if(f.name.endsWith('.json')) {
+      try{
+        const imported = JSON.parse(text);
+        // Option: merge profiles — we'll simply append imported profiles but avoid id collisions by renaming
+        if(imported.profiles && Array.isArray(imported.profiles)){
+          imported.profiles.forEach(ip=>{
+            ip.id = uid('profile');
+            state.profiles.push(ip);
+          });
+          saveState(); renderAll(); alert('Imported profiles added');
+        } else {
+          // treat as raw profile/transactions: add to active
+          const p = getActiveProfile();
+          if(!p) { alert('No active profile to import into'); return; }
+          if(imported.transactions && Array.isArray(imported.transactions)){
+            imported.transactions.forEach(t=> p.transactions.push({...t,id:uid('txn')}));
+            saveState(); renderAll(); alert('Transactions imported');
+          } else {
+            alert('JSON did not contain recognizable data.');
+          }
+        }
+      }catch(err){ alert('Invalid JSON') }
+    } else if(f.name.endsWith('.csv')){
+      // Basic CSV parse (very simple)
+      const lines = text.split(/\r?\n/).map(l=>l.trim()).filter(Boolean);
+      const header = lines.shift().split(',').map(h=>h.replace(/"/g,'').trim().toLowerCase());
+      const p = getActiveProfile(); if(!p) return alert('Select profile first');
+      lines.forEach(line=>{
+        const cols = line.split(',').map(c=>c.replace(/^"|"$/g,''));
+        const obj = {};
+        header.forEach((h,i)=> obj[h]=cols[i]);
+        const txn = {
+          id: uid('txn'),
+          date: obj.date || nowISO(),
+          type: obj.type || (Number(obj.amount) > 0 ? 'income' : 'expense'),
+          category: obj.category || 'Imported',
+          amount: Number(obj.amount || 0),
+          notes: obj.notes || 'Imported',
+          recurring: obj.recurring || 'none'
+        };
+        p.transactions.push(txn);
+      });
+      saveState(); renderAll(); alert('CSV imported');
+    } else alert('Unsupported file type');
+  };
+  reader.readAsText(f);
+  // reset input
+  e.target.value = '';
+}
+
+// ---------- Theme toggle ----------
+function toggleTheme(){
+  const body = document.body;
+  const cur = body.getAttribute('data-theme') || 'light';
+  const next = cur === 'light' ? 'dark' : 'light';
+  body.setAttribute('data-theme', next);
+  document.getElementById('toggleThemeBtn').textContent = next === 'light' ? 'Dark' : 'Light';
+}
+
+// ---------- Simple recurring processor (runs when app loads) ----------
+function processRecurring(){
+  const p = getActiveProfile(); if(!p) return;
+  const today = new Date();
+  // For each recurring txn, if last created date older than frequency, add new instances (very simple)
+  const frequencies = { monthly:30, weekly:7, yearly:365 };
+  const recurringItems = p.transactions.filter(t=>t.recurring && t.recurring!=='none');
+  recurringItems.forEach(item=>{
+    const lastDate = new Date(item.date);
+    const days = Math.floor((today - lastDate)/(1000*60*60*24));
+    const freq = frequencies[item.recurring] || 0;
+    if(freq && days >= freq){
+      // create new transaction(s) for each interval passed
+      const intervals = Math.floor(days / freq);
+      for(let i=1;i<=intervals;i++){
+        const dt = new Date(lastDate);
+        if(item.recurring==='monthly') dt.setMonth(dt.getMonth()+i);
+        if(item.recurring==='weekly') dt.setDate(dt.getDate() + (7*i));
+        if(item.recurring==='yearly') dt.setFullYear(dt.getFullYear()+i);
+        p.transactions.push({ id: uid('txn'), type: item.type, amount: item.amount, date: nowISO(dt), category: item.category, notes: item.notes+' (recurring)', recurring: item.recurring, createdAt: new Date().toISOString() });
+      }
+    }
+  });
+  saveState();
+}
+
+// run recurring processor once when loaded
+window.addEventListener('load', ()=> { loadState(); processRecurring(); renderAll(); });
+
+</script>
+</body>
+</html>
+
+
+---
+
+How to use
+
+1. Save the above as index.html.
+
+
+2. Open it in your browser (double-click or GitHub Pages).
+
+
+3. Create profiles, add transactions via Quick Add or Transactions → Add Transaction.
+
+
+4. Use Export JSON/CSV to back up your data. Use Import to upload CSV/JSON.
+
+
+5. Optionally set a passphrase to encrypt your entire saved blob in localStorage (it stays local — not transmitted).
+
+
+
+Notes & limitations
+
+Local only: data is stored in your browser (localStorage). If you clear browser storage, data is lost unless exported.
+
+Encryption: passphrase uses AES via CryptoJS — it encrypts the stored string in localStorage. Keep your passphrase safe.
+
+Bank sync: not implemented (would require backend + bank APIs). The CSV import is a simple way to bring in transactions.
+
+Recurring logic is intentionally simple — it creates missing instances when the app runs.
+
+Charts use Chart.js CDN.
+
+
+If you'd like, I can:
+
+Package this into a zip with separate CSS/JS files,
+
+Convert it to a React + Tailwind single-file app,
+
+Add a prettier UI theme (pink/cute theme like earlier),
+
+Add PDF export for reports,
+
+Implement a simple backend (Firebase) integration guide to enable cross-device sync.
+
+
+Which one would you like next?
+
